@@ -1,0 +1,65 @@
+name: Build App Lock Best APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Works if you uploaded the extracted project OR just the ZIP file.
+      - name: Locate project (auto-unzip if needed)
+        id: locate
+        run: |
+          set -e
+          if [ -f settings.gradle.kts ]; then
+            ROOT="."
+          else
+            ZIP=$(ls ./*.zip 2>/dev/null | head -n 1 || true)
+            if [ -z "$ZIP" ]; then echo "::error::No project or ZIP found in repo root"; exit 1; fi
+            mkdir -p _src
+            unzip -q -o "$ZIP" -d _src
+            ROOT=$(dirname "$(find _src -name settings.gradle.kts | head -n 1)")
+          fi
+          echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+          echo "Project root: $ROOT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        working-directory: ${{ steps.locate.outputs.root }}
+        run: gradle assembleDebug --stacktrace --no-daemon
+
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          cp "${{ steps.locate.outputs.root }}"/app/build/outputs/apk/debug/*.apk out/AppLockBest.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppLockBest-APK
+          path: out/AppLockBest.apk
+
+      - name: Publish GitHub Release (easy download on phone)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: App Lock Best build ${{ github.run_number }}
+          files: out/AppLockBest.apk
